@@ -87,6 +87,20 @@ type Connections struct {
 	Success bool
 }
 
+type Plots struct {
+	Plots []struct {
+		FileSize				int     `json:"file_size"`
+		FileName    			string  `json:"filename"`
+		PlotSeed				string 	`json:"plot-seed"`
+		PlotPublicKey			string 	`json:"plot_public_key"`
+		PlotContractPuzzleHash	string 	`json:"pool_contract_puzzle_hash"`
+		PoolPublicKey			string 	`json:"pool_public_key"`
+		Size					int 	`json:"size"`
+		TimeModified			float64 `json:"time_modified"`
+	}
+	Success bool
+}
+
 type Wallet struct {
 	ID        int
 	Name      string
