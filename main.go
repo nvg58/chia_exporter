@@ -34,11 +34,13 @@ import (
 )
 
 var (
-	addr   = flag.String("listen", ":9133", "The address to listen on for HTTP requests.")
-	cert   = flag.String("cert", "$HOME/.chia/mainnet/config/ssl/full_node/private_full_node.crt", "The full node SSL certificate.")
-	key    = flag.String("key", "$HOME/.chia/mainnet/config/ssl/full_node/private_full_node.key", "The full node SSL key.")
-	url    = flag.String("url", "https://localhost:8555", "The base URL for the full node RPC endpoint.")
-	wallet = flag.String("wallet", "https://localhost:9256", "The base URL for the wallet RPC endpoint.")
+	addr      = flag.String("listen", ":9133", "The address to listen on for HTTP requests.")
+	cert      = flag.String("cert", "$HOME/.chia/mainnet/config/ssl/full_node/private_full_node.crt", "The full node SSL certificate.")
+	key       = flag.String("key", "$HOME/.chia/mainnet/config/ssl/full_node/private_full_node.key", "The full node SSL key.")
+	url       = flag.String("url", "https://localhost:8555", "The base URL for the full node RPC endpoint.")
+	farmer    = flag.String("farmer", "https://localhost:8559", "The base URL for the farmer RPC endpoint.")
+	harvester = flag.String("harvester", "https://localhost:8560", "The base URL for the harvester RPC endpoint.")
+	wallet    = flag.String("wallet", "https://localhost:9256", "The base URL for the wallet RPC endpoint.")
 )
 
 var (
@@ -61,9 +63,11 @@ func main() {
 	}
 
 	cc := ChiaCollector{
-		client:    client,
-		baseURL:   *url,
-		walletURL: *wallet,
+		client:       client,
+		baseURL:      *url,
+		farmerURL:    *farmer,
+		harvesterURL: *harvester,
+		walletURL:    *wallet,
 	}
 	prometheus.MustRegister(cc)
 
@@ -125,9 +129,11 @@ func queryAPI(client *http.Client, base, endpoint, query string, result interfac
 }
 
 type ChiaCollector struct {
-	client    *http.Client
-	baseURL   string
-	walletURL string
+	client       *http.Client
+	baseURL      string
+	farmerURL    string
+	harvesterURL string
+	walletURL    string
 }
 
 // Describe is implemented with DescribeByCollect.
@@ -138,6 +144,10 @@ func (cc ChiaCollector) Describe(ch chan<- *prometheus.Desc) {
 // Collect queries Chia and returns metrics on ch.
 func (cc ChiaCollector) Collect(ch chan<- prometheus.Metric) {
 	cc.collectConnections(ch)
+	cc.collectFarmerConnections(ch)
+	cc.collectHarvesterConnections(ch)
+	cc.collectFarmerDetailedConnections(ch)
+	cc.collectHarvesterPlots(ch)
 	cc.collectBlockchainState(ch)
 	cc.collectWallets(ch)
 }
@@ -165,6 +175,147 @@ func (cc ChiaCollector) collectConnections(ch chan<- prometheus.Metric) {
 			strconv.Itoa(nt+1),
 		)
 	}
+}
+
+func (cc ChiaCollector) collectFarmerConnections(ch chan<- prometheus.Metric) {
+	var conns Connections
+	if err := queryAPI(cc.client, cc.farmerURL, "get_connections", "", &conns); err != nil {
+		log.Print(err)
+		return
+	}
+	peers := make([]int, NumNodeTypes)
+	for _, p := range conns.Connections {
+		peers[p.Type-1]++
+	}
+	desc := prometheus.NewDesc(
+		"chia_farmer_peers_count",
+		"Number of peers currently connected to the farmer.",
+		[]string{"type"}, nil,
+	)
+	for nt, cnt := range peers {
+		ch <- prometheus.MustNewConstMetric(
+			desc,
+			prometheus.GaugeValue,
+			float64(cnt),
+			strconv.Itoa(nt+1),
+		)
+	}
+}
+
+func (cc ChiaCollector) collectFarmerDetailedConnections(ch chan<- prometheus.Metric) {
+	var conns Connections
+	if err := queryAPI(cc.client, cc.farmerURL, "get_connections", "", &conns); err != nil {
+		log.Print(err)
+		return
+	}
+
+	desc := prometheus.NewDesc(
+		"chia_harvester_peer_last_message_time",
+		"Last time a peer connected to the farmer.",
+		[]string{"type", "peer_host"}, 
+		nil,
+	)
+	for _, p := range conns.Connections {
+		ch <- prometheus.MustNewConstMetric(
+			desc,
+			prometheus.GaugeValue,
+			float64(p.LastMessageTime),
+			strconv.Itoa(int(p.Type)), 
+			p.PeerHost,
+		)
+	}
+
+	desc = prometheus.NewDesc(
+		"chia_harvester_peer_bytes_read",
+		"Bytes read of a peer from the farmer.",
+		[]string{"type", "peer_host"}, 
+		nil,
+	)
+	for _, p := range conns.Connections {
+		ch <- prometheus.MustNewConstMetric(
+			desc,
+			prometheus.GaugeValue,
+			float64(p.BytesRead),
+			strconv.Itoa(int(p.Type)), 
+			p.PeerHost,
+		)
+	}
+
+	desc = prometheus.NewDesc(
+		"chia_harvester_peer_bytes_written",
+		"Bytes written of a peer to the farmer.",
+		[]string{"type", "peer_host"}, 
+		nil,
+	)
+	for _, p := range conns.Connections {
+		ch <- prometheus.MustNewConstMetric(
+			desc,
+			prometheus.GaugeValue,
+			float64(p.BytesWritten),
+			strconv.Itoa(int(p.Type)), 
+			p.PeerHost,
+		)
+	}
+
+	desc = prometheus.NewDesc(
+		"chia_harvester_peer_creation_time",
+		"Time a peer started connecting to the farmer.",
+		[]string{"type", "peer_host"}, 
+		nil,
+	)
+	for _, p := range conns.Connections {
+		ch <- prometheus.MustNewConstMetric(
+			desc,
+			prometheus.GaugeValue,
+			float64(p.CreationTime),
+			strconv.Itoa(int(p.Type)), 
+			p.PeerHost,
+		)
+	}
+}
+
+func (cc ChiaCollector) collectHarvesterConnections(ch chan<- prometheus.Metric) {
+	var conns Connections
+	if err := queryAPI(cc.client, cc.harvesterURL, "get_connections", "", &conns); err != nil {
+		log.Print(err)
+		return
+	}
+	peers := make([]int, NumNodeTypes)
+	for _, p := range conns.Connections {
+		peers[p.Type-1]++
+	}
+	desc := prometheus.NewDesc(
+		"chia_harvester_peers_count",
+		"Number of peers currently connected to the harvester.",
+		[]string{"type"}, nil,
+	)
+	for nt, cnt := range peers {
+		ch <- prometheus.MustNewConstMetric(
+			desc,
+			prometheus.GaugeValue,
+			float64(cnt),
+			strconv.Itoa(nt+1),
+		)
+	}
+}
+
+func (cc ChiaCollector) collectHarvesterPlots(ch chan<- prometheus.Metric) {
+	var plots Plots
+	if err := queryAPI(cc.client, cc.harvesterURL, "get_plots", "", &plots); err != nil {
+		log.Print(err)
+		return
+	}
+
+	desc := prometheus.NewDesc(
+		"chia_harvester_plots_farmed_count",
+		"Number of plots being farmed on this harvester.",
+		nil, nil,
+	)
+	ch <- prometheus.MustNewConstMetric(
+		desc,
+		prometheus.GaugeValue,
+		float64(len(plots.Plots)),
+	)
 }
 
 func (cc ChiaCollector) collectBlockchainState(ch chan<- prometheus.Metric) {
