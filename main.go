@@ -145,9 +145,9 @@ func (cc ChiaCollector) Describe(ch chan<- *prometheus.Desc) {
 func (cc ChiaCollector) Collect(ch chan<- prometheus.Metric) {
 	cc.collectConnections(ch)
 	cc.collectFarmerConnections(ch)
-	cc.collectHarvesterConnections(ch)
-	cc.collectFarmerDetailedConnections(ch)
-	cc.collectHarvesterPlots(ch)
+// 	cc.collectHarvesterConnections(ch)
+// 	cc.collectFarmerDetailedConnections(ch)
+// 	cc.collectHarvesterPlots(ch)
 	cc.collectBlockchainState(ch)
 	cc.collectWallets(ch)
 }
